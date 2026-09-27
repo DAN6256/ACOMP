@@ -1,0 +1,25 @@
+{
+  "name": "acomp-compile-server",
+  "version": "0.1.0",
+  "description": "HTTP API that compiles Arduino sketches with arduino-cli and returns the firmware binary.",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "swagger-ui-express": "^5.0.1",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.0"
+  }
+}

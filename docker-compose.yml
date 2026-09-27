@@ -1,0 +1,27 @@
+services:
+  compile-server:
+    build:
+      context: .
+      args:
+        ARDUINO_CORES: "arduino:avr"
+        # To add ESP32 later:
+        # ARDUINO_CORES: "arduino:avr esp32:esp32"
+        # ARDUINO_BOARD_URLS: "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
+    ports:
+      - "3000:3000"
+    environment:
+      MAX_CONCURRENT_COMPILES: 2
+      COMPILE_TIMEOUT_MS: 120000
+      RATE_LIMIT_PER_MINUTE: 30
+      # ALLOWED_FQBNS: "arduino:avr:uno,arduino:avr:nano"
+    # Sandbox: user code is only compiled, never run, but the compiler still reads files.
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+      - /home/node/.cache:size=512m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+    restart: unless-stopped

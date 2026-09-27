@@ -1,0 +1,323 @@
+openapi: 3.0.3
+info:
+  title: ACOMP Compile API
+  version: 0.1.0
+  description: |
+    Compiles Arduino sketches on the server with `arduino-cli` and returns the firmware,
+    ready to be sent to the board (for example over BLE by the mobile app).
+
+    **Typical flow**
+    1. `GET /api/v1/boards` to see which boards (FQBNs) this server can build for.
+    2. `POST /api/v1/compile` with the sketch source and the board FQBN.
+    3. Take `artifact` (base64) from the response, check `sha256`, and upload it to the board.
+
+    All errors use the same shape: `{ "error": { "code", "message", "details?" } }`.
+servers:
+  - url: /
+tags:
+  - name: Compile
+  - name: Boards
+  - name: System
+
+paths:
+  /api/v1/compile:
+    post:
+      tags: [Compile]
+      summary: Compile a sketch
+      description: |
+        Compiles `code` (the main `.ino` file) plus any extra `files` for the board `fqbn`.
+
+        **Choosing what you get back**
+        - `format` (in the body) picks the file type:
+          - `bin` (default): raw firmware bytes, ready to write to flash. Works for every board: ESP32
+            produces it directly, and for boards that only produce `.hex` (Uno, Nano, ...) the server
+            converts it. `loadAddress` says where the first byte goes (0 for AVR).
+          - `hex`: Intel HEX text, as the Arduino IDE produces it.
+          - `uf2`: drag-and-drop file for RP2040 and similar boards.
+        - `output` (query) picks how it is delivered:
+          - `json` (default): JSON with metadata and the file as base64 in `artifact`. Best for the mobile app.
+          - `file`: the firmware file itself, as a download. In Swagger UI a **Download file** link appears.
+            Metadata then comes back in `X-Firmware-*` headers.
+
+        Rate limited per client IP. Compiles run a few at a time; extra requests queue briefly
+        and get `503 SERVER_BUSY` once the queue is full.
+      operationId: compileSketch
+      parameters:
+        - name: output
+          in: query
+          required: false
+          description: "`json` = metadata + base64 file (default). `file` = download the firmware file directly."
+          schema:
+            type: string
+            enum: [json, file]
+            default: json
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompileRequest' }
+            examples:
+              blink:
+                summary: Blink on an Arduino Uno (.bin, raw bytes)
+                value:
+                  fqbn: arduino:avr:uno
+                  format: bin
+                  code: |
+                    void setup() { pinMode(LED_BUILTIN, OUTPUT); }
+                    void loop() {
+                      digitalWrite(LED_BUILTIN, HIGH); delay(500);
+                      digitalWrite(LED_BUILTIN, LOW);  delay(500);
+                    }
+              multiFile:
+                summary: Sketch with a header file (.hex)
+                value:
+                  fqbn: arduino:avr:uno
+                  format: hex
+                  code: |
+                    #include "blink.h"
+                    void setup() { pinMode(LED_BUILTIN, OUTPUT); }
+                    void loop() { blinkOnce(250); }
+                  files:
+                    - name: blink.h
+                      content: |
+                        #pragma once
+                        #include <Arduino.h>
+                        inline void blinkOnce(int ms) {
+                          digitalWrite(LED_BUILTIN, HIGH); delay(ms);
+                          digitalWrite(LED_BUILTIN, LOW);  delay(ms);
+                        }
+      responses:
+        '200':
+          description: Compiled successfully.
+          headers:
+            Content-Disposition:
+              description: Only with `output=file`. Suggested file name, e.g. `attachment; filename="sketch.ino.hex"`.
+              schema: { type: string }
+            X-Firmware-Format:
+              description: Only with `output=file`. File format (bin, hex, uf2).
+              schema: { type: string }
+            X-Firmware-Sha256:
+              description: Only with `output=file`. SHA-256 of the firmware.
+              schema: { type: string }
+            X-Firmware-Fqbn:
+              description: Only with `output=file`. Board the firmware was built for.
+              schema: { type: string }
+            X-Firmware-Load-Address:
+              description: Only with `output=file` and a converted `bin`. Flash address of the first byte (decimal).
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompileResult' }
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400':
+          description: |
+            Invalid request (`VALIDATION_ERROR`, `INVALID_JSON`) or the board is not installed
+            on this server (`UNKNOWN_BOARD`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Invalid compile request
+                  details: ['fqbn must look like "vendor:arch:board", e.g. "arduino:avr:uno"']
+        '413':
+          description: Request body too large (`PAYLOAD_TOO_LARGE`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: |
+            The sketch has errors (`COMPILE_ERROR`; see `details.compilerOutput`), or the board
+            does not produce the requested format (`FORMAT_UNAVAILABLE`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error:
+                  code: COMPILE_ERROR
+                  message: Sketch failed to compile
+                  details:
+                    compilerOutput: "sketch.ino:3:3: error: 'digitalWrit' was not declared in this scope"
+        '429':
+          description: Rate limit exceeded (`RATE_LIMITED`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Queue full (`SERVER_BUSY`) or arduino-cli missing (`COMPILER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '504':
+          description: Compilation took too long (`COMPILE_TIMEOUT`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/boards:
+    get:
+      tags: [Boards]
+      summary: List boards this server can compile for
+      operationId: listBoards
+      responses:
+        '200':
+          description: Installed boards.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [boards]
+                properties:
+                  boards:
+                    type: array
+                    items: { $ref: '#/components/schemas/Board' }
+        '503':
+          description: arduino-cli missing (`COMPILER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      description: Returns 200 when arduino-cli is available, 503 otherwise.
+      operationId: health
+      responses:
+        '200':
+          description: Healthy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '503':
+          description: arduino-cli is not available.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+components:
+  schemas:
+    CompileRequest:
+      type: object
+      required: [fqbn, code]
+      properties:
+        fqbn:
+          type: string
+          description: |
+            Fully Qualified Board Name, `vendor:arch:board[:option=value,...]`.
+            See `GET /api/v1/boards`.
+          example: arduino:avr:uno
+        code:
+          type: string
+          description: Contents of the main `.ino` file.
+        files:
+          type: array
+          description: Extra sketch files (tabs). Names must be plain file names, no folders.
+          maxItems: 19
+          items:
+            type: object
+            required: [name, content]
+            properties:
+              name:
+                type: string
+                pattern: '^[A-Za-z0-9_-]{1,64}\.(ino|h|hpp|c|cpp|S)$'
+                example: helpers.h
+              content:
+                type: string
+        format:
+          type: string
+          enum: [bin, hex, uf2]
+          default: bin
+          description: |
+            Firmware format to return. `bin` works for every board (converted from `.hex` when
+            the board has no native `.bin`). If omitted, the first available of bin, hex, uf2.
+
+    CompileResult:
+      type: object
+      required: [success, fqbn, format, fileName, sizeBytes, sha256, artifact]
+      properties:
+        success: { type: boolean, example: true }
+        fqbn: { type: string, example: arduino:avr:uno }
+        durationMs: { type: integer, example: 1830 }
+        format: { type: string, enum: [bin, hex, uf2], example: bin }
+        fileName: { type: string, example: sketch.ino.bin }
+        sizeBytes: { type: integer, description: Size of the firmware file in bytes, example: 960 }
+        loadAddress:
+          type: integer
+          nullable: true
+          description: |
+            Flash address of the first byte, for a `bin` converted from `.hex` (0 for AVR sketches).
+            `null` when the board produced the file natively.
+          example: 0
+        sha256: { type: string, description: SHA-256 of the firmware file (hex) }
+        memory:
+          type: array
+          description: Flash/RAM usage reported by the toolchain.
+          items:
+            type: object
+            properties:
+              name: { type: string, example: text }
+              size: { type: integer, example: 924 }
+              maxSize: { type: integer, nullable: true, example: 32256 }
+        compilerOutput:
+          type: string
+          description: Compiler messages, including warnings.
+        artifact:
+          type: string
+          format: byte
+          description: Firmware file, base64-encoded.
+
+    Board:
+      type: object
+      properties:
+        name: { type: string, example: Arduino Uno }
+        fqbn: { type: string, example: arduino:avr:uno }
+        platform: { type: string, example: arduino:avr }
+
+    Health:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        compiler:
+          type: object
+          properties:
+            available: { type: boolean }
+            version: { type: string, nullable: true, example: 1.2.2 }
+        queue:
+          type: object
+          properties:
+            active: { type: integer }
+            queued: { type: integer }
+            maxActive: { type: integer }
+            maxQueued: { type: integer }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - VALIDATION_ERROR
+                - INVALID_JSON
+                - PAYLOAD_TOO_LARGE
+                - UNKNOWN_BOARD
+                - COMPILE_ERROR
+                - FORMAT_UNAVAILABLE
+                - RATE_LIMITED
+                - SERVER_BUSY
+                - COMPILER_UNAVAILABLE
+                - COMPILER_ERROR
+                - COMPILE_TIMEOUT
+                - CONVERSION_FAILED
+                - NOT_FOUND
+                - INTERNAL_ERROR
+            message: { type: string }
+            details:
+              description: Extra information; shape depends on `code`.
