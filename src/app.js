@@ -3,6 +3,7 @@ import express from 'express';
 import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yaml';
+import { cors } from './lib/cors.js';
 import { errorHandler, notFoundHandler } from './lib/errors.js';
 import { boardsRouter } from './routes/boards.js';
 import { compileRouter } from './routes/compile.js';
@@ -25,7 +26,9 @@ export function createApp({ cli, config }) {
   app.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec, { customSiteTitle: 'ACOMP Compile API' }));
   app.get('/', (req, res) => res.redirect('/docs'));
 
-  app.use(helmet());
+  app.use(cors(config.corsOrigins));
+  // Allow browser apps on other origins to read responses (the default blocks them).
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   // JSON escaping can roughly double the size of source code, plus room for the envelope.
   app.use(express.json({ limit: config.maxSourceBytes * 2 + 16 * 1024 }));
 

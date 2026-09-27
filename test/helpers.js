@@ -10,6 +10,7 @@ export function testConfig(overrides = {}) {
     allowedFqbns: [],
     rateLimitPerMinute: 1000,
     trustProxy: 0,
+    corsOrigins: [],
     ...overrides,
   };
 }

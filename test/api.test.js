@@ -184,6 +184,36 @@ describe('GET /api/v1/boards', () => {
   });
 });
 
+describe('CORS', () => {
+  it('answers browser preflight requests', async () => {
+    const res = await request(makeApp().app)
+      .options('/api/v1/compile')
+      .set('Origin', 'http://localhost:5555')
+      .set('Access-Control-Request-Method', 'POST');
+    assert.equal(res.status, 204);
+    assert.equal(res.headers['access-control-allow-origin'], '*');
+    assert.match(res.headers['access-control-allow-headers'], /Content-Type/);
+  });
+
+  it('exposes firmware headers and allows cross-origin reads', async () => {
+    const res = await request(makeApp().app)
+      .post('/api/v1/compile')
+      .set('Origin', 'http://localhost:5555')
+      .send({ fqbn: 'arduino:avr:uno', code: BLINK });
+    assert.equal(res.headers['access-control-allow-origin'], '*');
+    assert.match(res.headers['access-control-expose-headers'], /X-Firmware-Sha256/);
+    assert.equal(res.headers['cross-origin-resource-policy'], 'cross-origin');
+  });
+
+  it('only allows listed origins when CORS_ORIGINS is set', async () => {
+    const { app } = makeApp({ config: testConfig({ corsOrigins: ['https://app.example.com'] }) });
+    const ok = await request(app).get('/api/v1/boards').set('Origin', 'https://app.example.com');
+    const other = await request(app).get('/api/v1/boards').set('Origin', 'https://evil.example');
+    assert.equal(ok.headers['access-control-allow-origin'], 'https://app.example.com');
+    assert.equal(other.headers['access-control-allow-origin'], undefined);
+  });
+});
+
 describe('system routes', () => {
   it('GET /health reports compiler status', async () => {
     const ok = await request(makeApp().app).get('/health');

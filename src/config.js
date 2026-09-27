@@ -26,6 +26,8 @@ export function loadConfig() {
     // Empty = any FQBN whose core is installed on the server.
     allowedFqbns: list('ALLOWED_FQBNS'),
     rateLimitPerMinute: positiveInt('RATE_LIMIT_PER_MINUTE', 30),
+    // Browser origins allowed to call the API, e.g. "https://app.example.com". Empty = any.
+    corsOrigins: list('CORS_ORIGINS'),
     // Number of reverse-proxy hops to trust for the client IP (0 = none).
     trustProxy: Number.parseInt(process.env.TRUST_PROXY ?? '0', 10) || 0,
   };
