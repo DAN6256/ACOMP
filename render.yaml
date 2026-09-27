@@ -1,0 +1,32 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+services:
+  - type: web
+    name: acomp-compile-server
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # free: 512 MB RAM, 0.1 CPU, sleeps after 15 min idle -> AVR compiles take a minute or more.
+    # starter ($7/mo): 512 MB, 0.5 CPU, always on. Enough for AVR.
+    # standard ($25/mo): 2 GB, 1 CPU. Needed for ESP32 builds.
+    plan: free
+    # Pick the region closest to your users: oregon, ohio, virginia, frankfurt, singapore.
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Render sits behind a proxy: without this every user shares one rate limit.
+      - key: TRUST_PROXY
+        value: "1"
+      - key: MAX_CONCURRENT_COMPILES
+        value: "1"
+      - key: MAX_QUEUED_COMPILES
+        value: "10"
+      - key: COMPILE_TIMEOUT_MS
+        value: "300000"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "30"
+      # Also passed to the Docker build as build args. To add ESP32 (needs the standard plan):
+      # - key: ARDUINO_CORES
+      #   value: "arduino:avr esp32:esp32"
+      # - key: ARDUINO_BOARD_URLS
+      #   value: "https://espressif.github.io/arduino-esp32/package_esp32_index.json"

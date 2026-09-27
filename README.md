@@ -19,6 +19,18 @@ curl localhost:3000/health
 The image installs `arduino-cli` and the `arduino:avr` core. To add more boards, change
 `ARDUINO_CORES` / `ARDUINO_BOARD_URLS` in [docker-compose.yml](docker-compose.yml) and rebuild.
 
+## Deploy on Render
+
+[render.yaml](render.yaml) is a Render Blueprint that builds the Dockerfile.
+
+1. Push this folder to a GitHub/GitLab repo.
+2. Render dashboard → **New → Blueprint** → select the repo → **Apply**.
+3. When it's live, open `https://<service>.onrender.com/docs`.
+
+Plan sizing: AVR builds are fine on **Starter**; ESP32 needs **Standard** (2 GB RAM). The free plan works but is
+slow (0.1 CPU) and sleeps after 15 minutes idle. To add boards, set `ARDUINO_CORES` / `ARDUINO_BOARD_URLS`
+env vars in Render (they're passed to the Docker build) and redeploy.
+
 ## Quick start (local)
 
 1. Install Node 20+ and [arduino-cli](https://arduino.github.io/arduino-cli/latest/installation/).

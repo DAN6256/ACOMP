@@ -18,9 +18,8 @@ USER node
 ENV ARDUINO_DIRECTORIES_DATA=/home/node/.arduino15 \
     ARDUINO_DIRECTORIES_USER=/home/node/Arduino \
     ARDUINO_BUILD_CACHE_PATH=/home/node/.cache/arduino
-RUN if [ -n "$ARDUINO_BOARD_URLS" ]; then arduino-cli config init && arduino-cli config set board_manager.additional_urls "$ARDUINO_BOARD_URLS"; fi \
- && arduino-cli core update-index \
- && arduino-cli core install ${ARDUINO_CORES} \
+RUN arduino-cli core update-index --additional-urls "${ARDUINO_BOARD_URLS}" \
+ && arduino-cli core install ${ARDUINO_CORES} --additional-urls "${ARDUINO_BOARD_URLS}" \
  && arduino-cli core list
 
 WORKDIR /app
@@ -28,7 +27,8 @@ COPY --chown=node:node package*.json ./
 RUN npm ci --omit=dev
 COPY --chown=node:node src ./src
 
+# Hosts like Render set their own PORT at runtime; 3000 is only the fallback.
 ENV NODE_ENV=production PORT=3000
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=10s CMD node -e "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=10s CMD node -e "fetch('http://localhost:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 CMD ["node", "src/server.js"]
